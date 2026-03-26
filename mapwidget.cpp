@@ -18,6 +18,11 @@
 #include "mapengine.h"
 #include <QKeyEvent>
 #include <QTime>
+#include <QLineEdit>
+#include <QLabel>
+#include <QGroupBox>
+#include <QTableWidget>
+#include <QHeaderView>
 
 
 mapwidget::mapwidget(QWidget *parent)
@@ -714,94 +719,114 @@ mapmarker* mapwidget::getSelectedMarker() const
     return m_selectedMarker;
 }
 
+
+
+
+
 void mapwidget::showEditAllMarkersDialog()
 {
-    // 弹出一个对话框，显示所有标记的信息
+    // 弹出一个对话框，双击直接编辑每个字段
     QDialog dialog(this);
-    dialog.setWindowTitle("编辑所有标记");
-    dialog.resize(400, 300);
-    
-    QVBoxLayout *layout = new QVBoxLayout(&dialog);
-    
-    QListWidget *markerList = new QListWidget(&dialog);
+    dialog.setWindowTitle("编辑标记");
+    dialog.resize(800, 450);
+
+    QVBoxLayout *mainLayout = new QVBoxLayout(&dialog);
+
+    // 说明标签
+    QLabel *hintLabel = new QLabel("双击单元格可直接编辑", &dialog);
+    hintLabel->setStyleSheet("color: gray;");
+    mainLayout->addWidget(hintLabel);
+
+    // 使用表格显示标记信息，每列都可编辑
+    QTableWidget *markerTable = new QTableWidget(&dialog);
+    markerTable->setColumnCount(4);
+    markerTable->setHorizontalHeaderLabels(QStringList() << "标题" << "纬度" << "经度" << "类型");
+    markerTable->setRowCount(m_markers.size());
+    markerTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    markerTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    markerTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    markerTable->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
+
     for (int i = 0; i < m_markers.size(); i++) {
-            mapmarker *marker = m_markers[i];
-            QString info = QString("%1: %2, %3, %4").arg(marker->title())
-                               .arg(marker->latitude())
-                               .arg(marker->longitude())
-                               .arg(marker->type());
-            QListWidgetItem *item = new QListWidgetItem(info);
-            item->setData(Qt::UserRole, i);
-            markerList->addItem(item);
-        }
-    layout->addWidget(markerList);
-    
+        mapmarker *marker = m_markers[i];
+
+        QTableWidgetItem *titleItem = new QTableWidgetItem(marker->title());
+        QTableWidgetItem *latItem = new QTableWidgetItem(QString::number(marker->latitude(), 'f', 6));
+        QTableWidgetItem *lonItem = new QTableWidgetItem(QString::number(marker->longitude(), 'f', 6));
+        QTableWidgetItem *typeItem = new QTableWidgetItem(marker->type());
+
+        // 设置对齐方式
+        latItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        lonItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+        // 存储标记索引
+        titleItem->setData(Qt::UserRole, i);
+        latItem->setData(Qt::UserRole, i);
+        lonItem->setData(Qt::UserRole, i);
+        typeItem->setData(Qt::UserRole, i);
+
+        markerTable->setItem(i, 0, titleItem);
+        markerTable->setItem(i, 1, latItem);
+        markerTable->setItem(i, 2, lonItem);
+        markerTable->setItem(i, 3, typeItem);
+    }
+
+    markerTable->resizeColumnsToContents();
+    mainLayout->addWidget(markerTable);
+
+    // 按钮区域
     QHBoxLayout *buttonLayout = new QHBoxLayout();
-    QPushButton *editButton = new QPushButton("编辑选中", &dialog);
-    QPushButton *deleteButton = new QPushButton("删除选中", &dialog);
+    QPushButton *confirmButton = new QPushButton("确认", &dialog);
     QPushButton *closeButton = new QPushButton("关闭", &dialog);
-    
-    buttonLayout->addWidget(editButton);
-    buttonLayout->addWidget(deleteButton);
+
+    buttonLayout->addStretch();
+    buttonLayout->addWidget(confirmButton);
     buttonLayout->addWidget(closeButton);
-    layout->addLayout(buttonLayout);
-    
-    connect(editButton, &QPushButton::clicked, [=, &dialog]() {
-        QListWidgetItem *item = markerList->currentItem();
-        if (item) {
-            int index = item->data(Qt::UserRole).toInt();
-            mapmarker *marker = m_markers[index];
-            
-            bool ok;
-            QString newTitle = QInputDialog::getText(&dialog, "编辑标记", "请输入新标题:", 
-                                                     QLineEdit::Normal, marker->title(), &ok);
-            if (ok && !newTitle.isEmpty()) {
-                marker->setTitle(newTitle);
-                // 更新列表项
-                QString info = QString("%1: %2, %3, %4").arg(marker->title())
-                                   .arg(marker->latitude())
-                                   .arg(marker->longitude())
-                                   .arg(marker->type());
-                item->setText(info);
-                update();
+    mainLayout->addLayout(buttonLayout);
+
+    // 确认按钮：应用所有更改
+    connect(confirmButton, &QPushButton::clicked, this, [this, markerTable, &dialog]() {
+        bool hasError = false;
+
+        for (int i = 0; i < markerTable->rowCount(); i++) {
+            mapmarker *marker = m_markers[i];
+
+            // 获取编辑后的值
+            QString newTitle = markerTable->item(i, 0)->text();
+            QString latStr = markerTable->item(i, 1)->text();
+            QString lonStr = markerTable->item(i, 2)->text();
+            QString newType = markerTable->item(i, 3)->text();
+
+            // 解析经纬度
+            bool latOk = false, lonOk = false;
+            double newLat = latStr.toDouble(&latOk);
+            double newLon = lonStr.toDouble(&lonOk);
+
+            if (!latOk || !lonOk) {
+                hasError = true;
+                continue;
             }
+
+            // 限制纬度范围
+            newLat = clampLatitude(newLat);
+
+            // 更新标记属性
+            marker->setTitle(newTitle);
+            marker->setLatitude(newLat);
+            marker->setLongitude(newLon);
+            marker->setType(newType);
         }
-    });
-    
-    connect(deleteButton, &QPushButton::clicked, [=, &dialog]() {
-        QListWidgetItem *item = markerList->currentItem();
-        if (item) {
-            int index = item->data(Qt::UserRole).toInt();
-            mapmarker *marker = m_markers[index];
-            
-            if (QMessageBox::question(&dialog, "删除标记", 
-                                      QString("确定要删除标记 %1 吗？").arg(marker->title())) == QMessageBox::Yes) {
-                if(marker == m_selectedMarker){
-                    m_selectedMarker = nullptr;
-                }
-                    m_markers.removeAt(index);
-                    delete marker;
-                    delete item;
-                
-                // 重新更新列表
-                markerList->clear();
-                for (int i = 0; i < m_markers.size(); i++) {
-                    mapmarker *m = m_markers[i];
-                    QString info = QString("%1: %2, %3, %4").arg(m->title())
-                                       .arg(m->latitude())
-                                       .arg(m->longitude())
-                                       .arg(m->type());
-                    QListWidgetItem *newItem = new QListWidgetItem(info);
-                    newItem->setData(Qt::UserRole, i);
-                    markerList->addItem(newItem);
-                }
-                
-                update();
-            }
+
+        if (hasError) {
+            QMessageBox::warning(&dialog, "部分错误", "部分经纬度输入无效，已跳过这些行。");
         }
+
+        // 刷新显示
+        update();
+        dialog.accept();
     });
-    
+
     connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::close);
-    
+
     dialog.exec();
 }
