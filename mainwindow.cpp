@@ -3,6 +3,8 @@
 #include "mapwidget.h"
 #include "mapmarker.h"
 
+#include <QDialog>
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
@@ -19,6 +21,7 @@ MainWindow::MainWindow(QWidget *parent)
     QMenuBar *menuBar = new QMenuBar(this);
     QMenu *fileMenu = menuBar->addMenu("File");
     QAction *exitAction = fileMenu->addAction("Exit");
+
     connect(exitAction, &QAction::triggered, this, &MainWindow::close);
     setMenuBar(menuBar);
 }

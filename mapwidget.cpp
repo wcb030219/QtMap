@@ -306,13 +306,17 @@ void mapwidget::mouseMoveEvent(QMouseEvent *event)
         double zoomFactor = (1 << m_zoomLevel);
         double totalPixels = zoomFactor * TILE_SIZE;
         
-        // X方向边界：经度范围 -180 到 180
-        int minX = -width() ;    // / 2;
-        int maxX = totalPixels;    // - width() / 2;
+        // X方向边界：确保地图充满整个控件宽度
+        int minX = 0;
+        int maxX = totalPixels - width();
         
-        // Y方向边界：纬度范围约 -85 到 85
-        int minY = -height();// / 2;
-        int maxY = totalPixels;// - height() / 2;
+        // Y方向边界：确保地图充满整个控件高度
+        int minY = 0;
+        int maxY = totalPixels - height();
+        
+        // 确保边界值合理
+        maxX = qMax(0, maxX);
+        maxY = qMax(0, maxY);
         
         // 限制偏移量在边界范围内
         newOffset.setX(qMax(minX, qMin(maxX, newOffset.x())));
@@ -322,9 +326,15 @@ void mapwidget::mouseMoveEvent(QMouseEvent *event)
         m_mapOffset = newOffset;
         m_lastMousePos = event->position().toPoint();
         
+        // 优化：减少重绘频率，提高拖拽流畅度
+        static QTime lastUpdateTime = QTime::currentTime();
+        if (lastUpdateTime.msecsTo(QTime::currentTime()) > 20) { // 每20ms重绘一次
+            update();
+            lastUpdateTime = QTime::currentTime();
+        }
+        
         // 重新加载瓦片
         loadVisibleTiles();
-        update();
     }
 }
 
@@ -379,6 +389,8 @@ void mapwidget::contextMenuEvent(QContextMenuEvent *event)
     QAction *mapboxAction = engineMenu->addAction("Mapbox");
     QAction *osmAction = engineMenu->addAction("OpenStreetMap");
 
+
+    //标记
     connect(addMarkAction, &QAction::triggered, this, [=](){
         QPair<double,double> geoPos = screenToGeo(clickPos.x(), clickPos.y());
         // 创建标记时不指定标题，让addMarker自动添加索引
@@ -387,15 +399,18 @@ void mapwidget::contextMenuEvent(QContextMenuEvent *event)
     });
 
     connect(editAllMarkersAction, &QAction::triggered, this, &mapwidget::showEditAllMarkersDialog);
+    connect(clearMarkersAction, &QAction::triggered, this, &mapwidget::clearMarkers);
 
+
+    //轨迹
     connect(addTrackPointAction,&QAction::triggered,this,[=](){
         QPair<double,double> geoPos = screenToGeo(clickPos.x(),clickPos.y());
         addTrackPoint(geoPos.first,geoPos.second);
     });
-
-    connect(clearMarkersAction, &QAction::triggered, this, &mapwidget::clearMarkers);
-
     connect(clearTrackPointAction,&QAction::triggered,this,&mapwidget::clearTrack);
+
+
+
 
     // 地图引擎切换
     connect(amapAction, &QAction::triggered, this, [=](){
@@ -501,9 +516,11 @@ void mapwidget::loadVisibleTiles()
     int endY = (m_mapOffset.y() + height()) / TILE_SIZE + 1;
     
     // 限制瓦片加载数量，避免拖拽时频繁加载
-    static QTime LastLoadTime =QTime::currentTime();
-    if (LastLoadTime.msecsTo(QTime::currentTime()) < 100) {
-        return; // 100ms内不重复加载
+    static QTime LastLoadTime = QTime::currentTime();
+    // 优化：拖拽时减少瓦片加载频率
+    int minInterval = m_isDragging ? 200 : 100; // 拖拽时200ms，静止时100ms
+    if (LastLoadTime.msecsTo(QTime::currentTime()) < minInterval) {
+        return; // 时间间隔内不重复加载
     }
     LastLoadTime = QTime::currentTime();
     
@@ -619,12 +636,14 @@ QPair<double, double> mapwidget::screenToGeo(int x, int y) const
     return QPair<double, double>(longitude, latitude);
 }
 
+
 void mapwidget::addTrackPoint(double longitude, double latitude)
 {
     // 存储经纬度坐标
     m_trackPoints.append(QPair<double, double>(longitude, latitude));
     update();
 }
+
 
 void mapwidget::clearTrack()
 {
@@ -635,11 +654,6 @@ void mapwidget::clearTrack()
 void mapwidget::setMapEngine(const QString &engineName)
 {
     m_currentEngine = engineName;
-
-    mapengine *oleEngine  = m_tileLoader->mapEngine();
-    if(oleEngine){
-        delete oleEngine;
-    }
 
     mapengine *engine = MapEngineFactory::createEngine(engineName);
     if (engine) {

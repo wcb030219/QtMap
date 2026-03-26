@@ -2,6 +2,7 @@
 #define MAPENGINE_H
 
 
+#include "qnetworkaccessmanager.h"
 #include <QPixmap>
 #include <QString>
 
@@ -11,8 +12,9 @@ public:
     mapengine(){}
     virtual ~mapengine(){}
 
-
     //virtual QPixmap getTile(int zoom,int x,int y) = 0;   //获取瓦片
+
+
 
     virtual void saveTileToCache(int zoom,int x,int y,const QByteArray &data);
 
@@ -27,9 +29,8 @@ public:
     virtual void setOfflineMode(bool enabled) = 0;  //设置离线状态
 
     virtual void setOfflineCachePath(const QString &path) = 0;   //设置离线缓存路径
-
     virtual QString tileUrlTemplate() const = 0;  //获取瓦片URL模板
-
+    QString m_offlineCachePath;
 };
 
 class MapEngineFactory

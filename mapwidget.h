@@ -47,6 +47,10 @@ public:
     void setDronePosition(double longitude, double latitude, double heading, const QString &type = "drone"); // 设置无人机位置
     void clearDronePosition(); // 清除无人机位置
     bool hasDronePosition() const; // 检查是否有无人机位置
+    
+    // 经纬度定位功能
+    void centerOnLocation(double longitude, double latitude, int zoomLevel = -1); // 定位到指定经纬度
+    void centerOnMarker(mapmarker *marker, int zoomLevel = -1); // 定位到指定标记点
 
 
 
@@ -85,8 +89,8 @@ private:
     // 地图常量
     static const int TILE_SIZE = 256; ///< 单张瓦片尺寸（高德/谷歌都是256x256）
     static const int MIN_ZOOM_LEVEL = 3; ///< 最小缩放级别
-    static const int MAX_ZOOM_LEVEL = 20; ///< 最大缩放级别
-    static const int INITIAL_ZOOM_LEVEL = 10; ///< 初始缩放级别
+    static const int MAX_ZOOM_LEVEL = 8; ///< 最大缩放级别
+    static const int INITIAL_ZOOM_LEVEL = 12; ///< 初始缩放级别
 
 
     
