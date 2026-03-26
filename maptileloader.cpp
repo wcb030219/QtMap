@@ -2,6 +2,9 @@
 #include <QDebug>
 #include <QMessageBox>
 #include <QNetworkReply>
+#include <QPainter>
+#include <QFont>
+#include <QColor>
 #include "mapengine.h"
 
 MapTileLoader::MapTileLoader(QObject *parent) : QObject(parent)
@@ -12,12 +15,22 @@ MapTileLoader::MapTileLoader(QObject *parent) : QObject(parent)
     m_mapEngine = MapEngineFactory::createEngine("amap");
     m_maxConcurrentRequest = 6;
     m_currentConcurrentRequest = 0;
+    m_isDragging = false;
 
-    
+    // 初始化工作线程
+    m_workerThread = new ImageWorkerThread(this);
+    connect(m_workerThread, &ImageWorkerThread::taskCompleted, this, &MapTileLoader::onImageTaskCompleted);
+    connect(m_workerThread, &ImageWorkerThread::taskFailed, this, &MapTileLoader::onImageTaskFailed);
+    m_workerThread->start();
 }
 
 MapTileLoader::~MapTileLoader()
 {
+    if (m_workerThread) {
+        m_workerThread->stop();
+        m_workerThread->wait();
+        delete m_workerThread;
+    }
     if (m_mapEngine) {
         delete m_mapEngine;
     }
@@ -47,6 +60,10 @@ void MapTileLoader::loadTile(int zoom, int x, int y)
         }
     }
 
+    // 发送占位格
+    QPixmap placeholder = createPlaceholder();
+    m_tileCache.insert(key, new QPixmap(placeholder));
+    emit tileLoaded(zoom, x, y, placeholder);
 
     if(m_pendingRequest.contains(key)){
         return;
@@ -96,6 +113,34 @@ bool MapTileLoader::offlineMode() const
     return m_offlineMode;
 }
 
+bool MapTileLoader::isDragging() const
+{
+    return m_isDragging;
+}
+
+void MapTileLoader::cancelAllRequests()
+{
+    // 清空请求队列
+    m_requestQueue.clear();
+
+    // 取消所有正在进行的网络请求
+    for (QNetworkReply *reply : m_activeReplies) {
+        if (reply && reply->isRunning()) {
+            reply->abort();
+        }
+    }
+
+    // 清空待处理请求集合
+    m_pendingRequest.clear();
+
+    // 重置当前并发请求数
+    m_currentConcurrentRequest = 0;
+
+    // 清空活跃请求列表
+    m_activeReplies.clear();
+}
+
+
 void MapTileLoader::onReplyFinished()
 {
     QNetworkReply *reply = qobject_cast<QNetworkReply*>(sender());
@@ -107,25 +152,58 @@ void MapTileLoader::onReplyFinished()
 
     m_pendingRequest.remove(key);
     m_currentConcurrentRequest--;
+    m_activeReplies.removeOne(reply);
 
     if(reply->error() == QNetworkReply::NoError){
         QByteArray data = reply->readAll();
 
         if(m_mapEngine){
             m_mapEngine->saveTileToCache(zoom,x,y,data);
-
         }
-        QPixmap pixmap;
-        pixmap.loadFromData(data);
-        if(!pixmap.isNull()){
-            m_tileCache.insert(key,new QPixmap(pixmap));
-            emit tileLoaded(zoom,x,y,pixmap);
-        }
+        
+        // 将图片加载任务交给工作线程处理
+        ImageWorkerThread::Task task;
+        task.type = ImageWorkerThread::LoadImage;
+        task.path = key;
+        task.data = data;
+        m_workerThread->addTask(task);
     }
     reply->deleteLater();
 
     processNextRequest();
 }
+
+
+void MapTileLoader::setDraggingState(bool isDragging)
+{
+    if(m_isDragging != isDragging){
+        m_isDragging = isDragging;
+        emit draggingStateChanged(isDragging);
+    }
+}
+
+
+void MapTileLoader::onImageTaskCompleted(const QString &key, const QPixmap &pixmap)   //图片任务完成处理函数
+{
+    if (!pixmap.isNull()) {
+        // 从key中解析出zoom, x, y
+        QStringList parts = key.split('_');
+        if (parts.size() == 3) {
+            int zoom = parts[0].toInt();
+            int x = parts[1].toInt();
+            int y = parts[2].toInt();
+            m_tileCache.insert(key, new QPixmap(pixmap));
+            emit tileLoaded(zoom, x, y, pixmap);
+        }
+    }
+}
+
+
+void MapTileLoader::onImageTaskFailed(const QString &key, const QString &error)
+{
+    qDebug() << "Image task failed:" << key << error;
+}
+
 
 void MapTileLoader::processNextRequest()
 {
@@ -154,6 +232,7 @@ void MapTileLoader::processNextRequest()
         reply->setProperty("key",key);
 
         connect(reply,&QNetworkReply::finished,this,&MapTileLoader::onReplyFinished);
+        m_activeReplies.append(reply);
         m_currentConcurrentRequest++;
     }
 }
@@ -161,4 +240,21 @@ void MapTileLoader::processNextRequest()
 QString MapTileLoader::tileKey(int zoom, int x, int y) const
 {
     return QString("%1_%2_%3").arg(zoom).arg(x).arg(y);
+}
+
+QPixmap MapTileLoader::createPlaceholder() const
+{
+    // 创建一个256x256的占位格图像
+    QPixmap placeholder(256, 256);
+    
+    // 填充灰色背景
+    placeholder.fill(QColor(230, 230, 230));
+    
+    // 绘制加载中文字
+    QPainter painter(&placeholder);
+    painter.setPen(QColor(100, 100, 100));
+    painter.setFont(QFont("Arial", 12));
+    painter.drawText(placeholder.rect(), Qt::AlignCenter, "加载中...");
+    
+    return placeholder;
 }
