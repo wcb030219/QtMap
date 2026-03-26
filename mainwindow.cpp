@@ -21,6 +21,13 @@ MainWindow::MainWindow(QWidget *parent)
     QAction *exitAction = fileMenu->addAction("Exit");
     connect(exitAction, &QAction::triggered, this, &MainWindow::close);
     setMenuBar(menuBar);
+
+    mapwidget *map = new mapwidget();
+    map->resize(800, 600);
+    map->show();
+
+    // 设置无人机位置（示例坐标：北京）
+    map->setDronePosition(116.404, 39.915, 45.0, "DJI Phantom");
 }
 
 MainWindow::~MainWindow()

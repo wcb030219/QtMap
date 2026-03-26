@@ -22,28 +22,36 @@
 
 mapwidget::mapwidget(QWidget *parent)
     : QWidget{parent},
-    mZoomLevel(INITIAL_ZOOM_LEVEL),
-    mMapOffset(0, 0),
-    mIsDragging(false),
-    mSelectedMarker(nullptr),
-    mNextMarkerIndex(1),
-    mCurrentEngine("amap")
+    m_zoomLevel(INITIAL_ZOOM_LEVEL),
+    m_mapOffset(0, 0),
+    m_isDragging(false),
+    m_isDraggingMarker(false),
+    m_selectedMarker(nullptr),
+    m_nextMarkerIndex(1),
+    m_currentEngine("amap"),
+    m_hasDronePosition(false),
+    m_droneLongitude(0.0),
+    m_droneLatitude(0.0),
+    m_droneHeading(0.0),
+    m_droneType("drone")
 {
     // 创建MapTileLoader实例
-    mTileLoader = new MapTileLoader(this);
+    m_tileLoader = new MapTileLoader(this);
 
     // 默认使用高德地图引擎
     mapengine *engine = MapEngineFactory::createEngine("amap");
     if(engine){
-        mTileLoader->setMapEngine(engine);
+        m_tileLoader->setMapEngine(engine);
     }
+
+
     
     // 连接信号和槽
-    connect(mTileLoader, &MapTileLoader::tileLoaded, this, &mapwidget::onTileLoaded);
+    connect(m_tileLoader, &MapTileLoader::tileLoaded, this, &mapwidget::onTileLoaded);
     
     // 移除初始位置设置，使用默认偏移量
-    mMapOffset = QPoint(0, 0);
-    
+    m_mapOffset = QPoint(0, 0);
+
     // 加载初始瓦片
     loadVisibleTiles();
 }
@@ -56,19 +64,19 @@ void mapwidget::paintEvent(QPaintEvent *event)
     for (int x = 0; x < width() / TILE_SIZE + 2; x++) {
         for (int y = 0; y < height() / TILE_SIZE + 2; y++) {
             // 计算瓦片坐标
-            int tileX = (mMapOffset.x() / TILE_SIZE) + x;
-            int tileY = (mMapOffset.y() / TILE_SIZE) + y;
+            int tileX = (m_mapOffset.x() / TILE_SIZE) + x;
+            int tileY = (m_mapOffset.y() / TILE_SIZE) + y;
             
             // 获取瓦片
-            QPixmap tile = mTileLoader->getCachedTile(mZoomLevel, tileX, tileY);
+            QPixmap tile = m_tileLoader->getCachedTile(m_zoomLevel, tileX, tileY);
             if (!tile.isNull()) {
                 // 绘制瓦片
-                int drawX = x * TILE_SIZE - (mMapOffset.x() % TILE_SIZE);
-                int drawY = y * TILE_SIZE - (mMapOffset.y() % TILE_SIZE);
+                int drawX = x * TILE_SIZE - (m_mapOffset.x() % TILE_SIZE);
+                int drawY = y * TILE_SIZE - (m_mapOffset.y() % TILE_SIZE);
                 
                 // 根据缩放级别调整渲染提示
                 // 当缩放级别较低（地图缩小很多）时，使用快速变换保持像素清晰
-                if (mZoomLevel < 6) {
+                if (m_zoomLevel < 6) {
                     painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
                 } else {
                     painter.setRenderHint(QPainter::SmoothPixmapTransform);
@@ -80,7 +88,7 @@ void mapwidget::paintEvent(QPaintEvent *event)
     }
     
     // 绘制标记点
-    for (mapmarker *marker : std::as_const(mMarkers)) {
+    for (mapmarker *marker : std::as_const(m_markers)) {
         double longitude = marker->longitude();
         double latitude = marker->latitude();
         QPointF screenPos = geoToScreen(longitude, latitude);
@@ -97,7 +105,7 @@ void mapwidget::paintEvent(QPaintEvent *event)
             painter.drawPixmap(drawX,drawY,scaledIcon);
         } else {
             // 如果没有图标，绘制默认标记（圆点中心在标记点位置）
-            if (marker == mSelectedMarker) {
+            if (marker == m_selectedMarker) {
                 // 选中的标记使用不同的颜色
                 painter.setPen(QPen(Qt::blue, 3));
                 painter.setBrush(QBrush(Qt::yellow));
@@ -118,7 +126,7 @@ void mapwidget::paintEvent(QPaintEvent *event)
         // 绘制标记点标题
         QString title = marker->title();
         if (!title.isEmpty()) {
-            if (marker == mSelectedMarker) {
+            if (marker == m_selectedMarker) {
                 painter.setPen(QPen(Qt::blue, 2));
             } else {
                 painter.setPen(QPen(Qt::black));
@@ -127,20 +135,23 @@ void mapwidget::paintEvent(QPaintEvent *event)
         }
         
         // 为选中的标记绘制选中效果
-        if (marker == mSelectedMarker) {
+        if (marker == m_selectedMarker) {
             painter.setPen(QPen(Qt::blue, 2, Qt::DashLine));
             painter.setBrush(Qt::NoBrush);
             QPointF midPos = screenPos;
             midPos.ry() -= 10;
             painter.drawEllipse(midPos, 15, 15);
+            
+            // 绘制经纬度信息在标记旁边
+            drawCoordinateTooltip(&painter, screenPos, marker->longitude(), marker->latitude());
         }
     }
 
-    if(mTrackPoints.size()>1){
+    if(m_trackPoints.size()>1){
         painter.setPen(QPen(Qt::blue,2));
         // 转换轨迹点为屏幕坐标并绘制
         QVector<QPointF> screenPoints;
-        for (const auto &point : mTrackPoints) {
+        for (const auto &point : m_trackPoints) {
             double longitude = point.first;
             double latitude = point.second;
             QPointF screenPos = geoToScreen(longitude, latitude);
@@ -148,29 +159,80 @@ void mapwidget::paintEvent(QPaintEvent *event)
         }
         painter.drawPolyline(screenPoints.data(), screenPoints.size());
     }
+    
+
+
+    // 绘制无人机位置
+    if (m_hasDronePosition) {
+        QPointF screenPos = geoToScreen(m_droneLongitude, m_droneLatitude);
+        
+        // 保存当前绘制状态
+        painter.save();
+        
+        // 移动到无人机位置
+        painter.translate(screenPos);
+        
+        // 旋转到无人机方向
+        painter.rotate(m_droneHeading);
+        
+        // 绘制无人机图标（使用三角形表示）
+        painter.setPen(QPen(Qt::red, 2));
+        painter.setBrush(QBrush(Qt::red));
+        
+        // 绘制无人机形状（三角形）
+        QPainterPath dronePath;
+        dronePath.moveTo(0, -15); // 机头
+        dronePath.lineTo(-10, 10); // 左翼
+        dronePath.lineTo(10, 10); // 右翼
+        dronePath.closeSubpath();
+        painter.drawPath(dronePath);
+        
+        // 绘制方向指示器（细线）
+        painter.setPen(QPen(Qt::yellow, 2));
+        painter.drawLine(0, -15, 0, -25);
+        
+        // 恢复绘制状态
+        painter.restore();
+        
+        // 绘制无人机信息
+        painter.setPen(QPen(Qt::black));
+        QString droneInfo = QString("无人机: %1\n方向: %2°").arg(m_droneType).arg(m_droneHeading, 0, 'f', 1);
+        QFontMetrics metrics(painter.font());
+        QRect textRect = metrics.boundingRect(0, 0, 200, 50, Qt::TextWordWrap, droneInfo);
+        textRect.adjust(-5, -5, 5, 5);
+        textRect.moveTo(screenPos.x() + 20, screenPos.y() - textRect.height() - 10);
+        
+        painter.setBrush(QBrush(QColor(255, 255, 220, 200)));
+        painter.drawRect(textRect);
+        painter.drawText(textRect, Qt::AlignCenter, droneInfo);
+    }
 }
+
+
+
+
 
 void mapwidget::wheelEvent(QWheelEvent *event)
 {
     // 处理鼠标滚轮事件，实现缩放
-    int oldZoom = mZoomLevel;
+    int oldZoom = m_zoomLevel;
     
     if (event->angleDelta().y() > 0) {
         // 放大
-        if (mZoomLevel < MAX_ZOOM_LEVEL) {
-            mZoomLevel++;
+        if (m_zoomLevel < MAX_ZOOM_LEVEL) {
+            m_zoomLevel++;
         }
     } else {
         // 缩小
-        if (mZoomLevel > MIN_ZOOM_LEVEL) {
-            mZoomLevel--;
+        if (m_zoomLevel > MIN_ZOOM_LEVEL) {
+            m_zoomLevel--;
         }
     }
     
     // 只有缩放级别实际改变时才更新偏移量
-    if (mZoomLevel != oldZoom) {
+    if (m_zoomLevel != oldZoom) {
         // 计算缩放比例
-        double scale = pow(2, mZoomLevel - oldZoom);
+        double scale = pow(2, m_zoomLevel - oldZoom);
         
         // 获取鼠标位置
         QPoint mousePos = event->position().toPoint();
@@ -180,17 +242,19 @@ void mapwidget::wheelEvent(QWheelEvent *event)
         // 缩放后：新地图坐标 = 旧地图坐标 * scale
         // 要求：新屏幕坐标 = 旧屏幕坐标（鼠标位置不变）
         // 所以：新偏移量 = 新地图坐标 - 鼠标位置
-        double mapX = mousePos.x() + mMapOffset.x();
-        double mapY = mousePos.y() + mMapOffset.y();
+        double mapX = mousePos.x() + m_mapOffset.x();
+        double mapY = mousePos.y() + m_mapOffset.y();
         double newMapX = mapX * scale;
         double newMapY = mapY * scale;
-        mMapOffset = QPoint(newMapX - mousePos.x(), newMapY - mousePos.y());
+        m_mapOffset = QPoint(newMapX - mousePos.x(), newMapY - mousePos.y());
         
         // 重新加载瓦片
         loadVisibleTiles();
         update();
     }
 }
+
+
 
 void mapwidget::mousePressEvent(QMouseEvent *event)
 {
@@ -203,26 +267,38 @@ void mapwidget::mousePressEvent(QMouseEvent *event)
         if (clickedMarker) {
             // 选中标记
             setSelectedMarker(clickedMarker);
+            m_isDraggingMarker = true;
+            m_markerDragStartPos = clickPos;
+            m_isDragging = false;
         } else {
             // 点击空白处，取消选中
             setSelectedMarker(nullptr);
+            m_isDragging = true;
+            m_isDraggingMarker = false;
         }
         
-        mLastMousePos = clickPos;
-        mIsDragging = true;
+        m_lastMousePos = clickPos;
+        m_tileLoader->cancelAllRequests();
+        m_tileLoader->setDraggingState(true);
         setCursor(Qt::ClosedHandCursor);
     }
 }
 
 void mapwidget::mouseMoveEvent(QMouseEvent *event)
 {
+
+    if(m_isDraggingMarker){
+        QPoint currentPos = event->position().toPoint();
+        updateMarkerPosition(currentPos);
+        update();
+    }
     // 处理鼠标移动事件，实现平移
-    if (mIsDragging) {
-        QPoint delta = event->position().toPoint() - mLastMousePos;
-        QPoint newOffset = mMapOffset - delta;
+    else if (m_isDragging) {
+        QPoint delta = event->position().toPoint() - m_lastMousePos;
+        QPoint newOffset = m_mapOffset - delta;
         
         // 计算地图边界限制
-        double zoomFactor = (1 << mZoomLevel);
+        double zoomFactor = (1 << m_zoomLevel);
         double totalPixels = zoomFactor * TILE_SIZE;
         
         // X方向边界：经度范围 -180 到 180
@@ -238,8 +314,8 @@ void mapwidget::mouseMoveEvent(QMouseEvent *event)
         newOffset.setY(qMax(minY, qMin(maxY, newOffset.y())));
         
         // 更新偏移量
-        mMapOffset = newOffset;
-        mLastMousePos = event->position().toPoint();
+        m_mapOffset = newOffset;
+        m_lastMousePos = event->position().toPoint();
         
         // 重新加载瓦片
         loadVisibleTiles();
@@ -251,14 +327,16 @@ void mapwidget::mouseReleaseEvent(QMouseEvent *event)
 {
     // 处理鼠标释放事件
     if (event->button() == Qt::LeftButton) {
-        mIsDragging = false;
+        m_isDragging = false;
+        m_isDraggingMarker = false;
+        m_tileLoader->setDraggingState(false);
         setCursor(Qt::ArrowCursor);
     }
 }
 
 mapmarker* mapwidget::findMarkerAtPosition(const QPoint &pos) const  //检测点击位置是否在某个标记上
 {
-    for (mapmarker *marker : mMarkers) {
+    for (mapmarker *marker : m_markers) {
         QPointF screenPos = geoToScreen(marker->longitude(), marker->latitude());
         // 检测点击位置是否在标记附近（半径15像素范围内）
         double distance = std::sqrt(std::pow(pos.x() - screenPos.x(), 2) + 
@@ -326,9 +404,9 @@ void mapwidget::contextMenuEvent(QContextMenuEvent *event)
     });
 
     if(clickedMarker){
-        if(mSelectedMarker != nullptr){
+        if(m_selectedMarker != nullptr){
         connect(deleteMarkerAction, &QAction::triggered, this, [=](){
-            removeMarker(mSelectedMarker);
+            removeMarker(m_selectedMarker);
             });}
     }
 
@@ -337,12 +415,9 @@ void mapwidget::contextMenuEvent(QContextMenuEvent *event)
 
 
 
-
-
-
 void mapwidget::keyPressEvent(QKeyEvent *event)
 {
-    if(event->key() == Qt::Key_Delete && mSelectedMarker != nullptr){
+    if(event->key() == Qt::Key_Delete && m_selectedMarker != nullptr){
         deleteSelectedMarker();
     }else{
         QWidget::keyPressEvent(event);
@@ -354,21 +429,59 @@ void mapwidget::keyPressEvent(QKeyEvent *event)
 void mapwidget::onTileLoaded(int zoom, int x, int y, const QPixmap &pixmap)
 {
     // 瓦片加载完成，触发重绘
-    if (zoom == mZoomLevel) {
+    if (zoom == m_zoomLevel) {
         update();
     }
 }
 
+
+
 void mapwidget::deleteSelectedMarker()
 {
-    if(!mSelectedMarker){
+    if(!m_selectedMarker){
         return;
     }
 
-    mMarkers.removeOne(mSelectedMarker);
-    delete mSelectedMarker;
-    mSelectedMarker = nullptr;
+    m_markers.removeOne(m_selectedMarker);
+    delete m_selectedMarker;
+    m_selectedMarker = nullptr;
     update();
+}
+
+
+
+void mapwidget::updateMarkerPosition(const QPoint &pos)
+{
+    if(m_selectedMarker){
+        QPair<double,double> geoPos = screenToGeo(pos.x(),pos.y());
+        m_selectedMarker->setLongitude(geoPos.first);
+        m_selectedMarker->setLatitude(geoPos.second);
+    }
+}
+
+
+
+
+
+void mapwidget::drawCoordinateTooltip(QPainter *painter, const QPointF &pos, double longitude, double latitude)
+{
+    // 格式化坐标文本
+    QString coordText = QString("纬度: %1\n经度: %2").arg(latitude, 0, 'f', 6).arg(longitude, 0, 'f', 6);
+
+    // 绘制背景
+    QFontMetrics metrics(painter->font());
+    QRect textRect = metrics.boundingRect(0, 0, 200, 50, Qt::TextWordWrap, coordText);
+    textRect.adjust(-5, -5, 5, 5);
+    // 调整位置，显示在标记的右上方
+    textRect.moveTo(pos.x() + 20, pos.y() - textRect.height() - 10);
+
+    painter->setBrush(QBrush(QColor(255, 255, 220, 200)));
+    painter->setPen(QPen(Qt::black, 1));
+    painter->drawRect(textRect);
+
+    // 绘制文本
+    painter->setPen(QPen(Qt::black));
+    painter->drawText(textRect, Qt::AlignCenter, coordText);
 }
 
 
@@ -377,10 +490,10 @@ void mapwidget::deleteSelectedMarker()
 void mapwidget::loadVisibleTiles()
 {
     // 计算可见区域的瓦片范围
-    int startX = mMapOffset.x() / TILE_SIZE - 1;
-    int startY = mMapOffset.y() / TILE_SIZE - 1;
-    int endX = (mMapOffset.x() + width()) / TILE_SIZE + 1;
-    int endY = (mMapOffset.y() + height()) / TILE_SIZE + 1;
+    int startX = m_mapOffset.x() / TILE_SIZE - 1;
+    int startY = m_mapOffset.y() / TILE_SIZE - 1;
+    int endX = (m_mapOffset.x() + width()) / TILE_SIZE + 1;
+    int endY = (m_mapOffset.y() + height()) / TILE_SIZE + 1;
     
     // 限制瓦片加载数量，避免拖拽时频繁加载
     static QTime LastLoadTime =QTime::currentTime();
@@ -391,8 +504,8 @@ void mapwidget::loadVisibleTiles()
     
     int centerScreenX = width()/2;
     int centerScreenY = height()/2;
-    int centerTileX = (mMapOffset.x() + centerScreenX) / TILE_SIZE;
-    int centerTileY = (mMapOffset.y() + centerScreenY) / TILE_SIZE;
+    int centerTileX = (m_mapOffset.x() + centerScreenX) / TILE_SIZE;
+    int centerTileY = (m_mapOffset.y() + centerScreenY) / TILE_SIZE;
 
     QVector<QPair<int,QPair<int,int>>> tiles;
     for(int x = startX; x < endX; x++){
@@ -413,7 +526,7 @@ void mapwidget::loadVisibleTiles()
             if(tileCount<20){
                 int x = tile.second.first;
                 int y = tile.second.second;
-                mTileLoader->loadTile(mZoomLevel,x,y);
+                m_tileLoader->loadTile(m_zoomLevel,x,y);
                 tileCount++;
             }
         }
@@ -430,11 +543,11 @@ void mapwidget::addMarker(mapmarker *marker)
         // 自动添加索引
         QString title = marker->title();
         if (title.isEmpty()) {
-            title = QString("标记%1").arg(mNextMarkerIndex);
+            title = QString("标记%1").arg(m_nextMarkerIndex);
             marker->setTitle(title);
-            mNextMarkerIndex++;
+            m_nextMarkerIndex++;
         }
-        mMarkers.append(marker);
+        m_markers.append(marker);
         update();
     }
 }
@@ -444,7 +557,7 @@ void mapwidget::addMarker(mapmarker *marker)
 void mapwidget::removeMarker(mapmarker *marker)
 {
     if (marker) {
-        mMarkers.removeOne(marker);
+        m_markers.removeOne(marker);
         delete marker;
         update(); // 触发重绘
     }
@@ -452,9 +565,9 @@ void mapwidget::removeMarker(mapmarker *marker)
 
 void mapwidget::clearMarkers()
 {
-    mMarkers.clear();
-    mNextMarkerIndex = 1; // 重置索引
-    mSelectedMarker = nullptr; // 清除选中状态
+    m_markers.clear();
+    m_nextMarkerIndex = 1; // 重置索引
+    m_selectedMarker = nullptr; // 清除选中状态
     update(); // 触发重绘
 }
 
@@ -465,7 +578,7 @@ QPointF mapwidget::geoToScreen(double longitude, double latitude) const
 {
 
     latitude = clampLatitude(latitude);
-    double zoomFactor = (1 << mZoomLevel);
+    double zoomFactor = (1 << m_zoomLevel);
     double totalPixels = zoomFactor * TILE_SIZE;
 
     // 经度转换
@@ -476,16 +589,16 @@ QPointF mapwidget::geoToScreen(double longitude, double latitude) const
     double y = (1.0 - std::log(std::tan(M_PI / 4.0 + latRad / 2.0)) / M_PI) / 2.0 * totalPixels;
 
     // 应用地图偏移
-    return QPointF(x - mMapOffset.x(), y - mMapOffset.y());
+    return QPointF(x - m_mapOffset.x(), y - m_mapOffset.y());
 }
 
 QPair<double, double> mapwidget::screenToGeo(int x, int y) const
 {
-    double zoomFactor = (1 << mZoomLevel);
+    double zoomFactor = (1 << m_zoomLevel);
     double totalPixels = zoomFactor * TILE_SIZE;
 
-    double screenX = x + mMapOffset.x();
-    double screenY = y + mMapOffset.y();
+    double screenX = x + m_mapOffset.x();
+    double screenY = y + m_mapOffset.y();
 
     double longitude = (screenX / totalPixels - 0.5) * 360.0;
 
@@ -504,28 +617,28 @@ QPair<double, double> mapwidget::screenToGeo(int x, int y) const
 void mapwidget::addTrackPoint(double longitude, double latitude)
 {
     // 存储经纬度坐标
-    mTrackPoints.append(QPair<double, double>(longitude, latitude));
+    m_trackPoints.append(QPair<double, double>(longitude, latitude));
     update();
 }
 
 void mapwidget::clearTrack()
 {
-    mTrackPoints.clear();
+    m_trackPoints.clear();
     update();
 }
 
 void mapwidget::setMapEngine(const QString &engineName)
 {
-    mCurrentEngine = engineName;
+    m_currentEngine = engineName;
 
-    mapengine *oleEngine  = mTileLoader->mapEngine();
+    mapengine *oleEngine  = m_tileLoader->mapEngine();
     if(oleEngine){
         delete oleEngine;
     }
 
     mapengine *engine = MapEngineFactory::createEngine(engineName);
     if (engine) {
-        mTileLoader->setMapEngine(engine);
+        m_tileLoader->setMapEngine(engine);
         // 重新加载瓦片
         loadVisibleTiles();
         update();
@@ -534,36 +647,71 @@ void mapwidget::setMapEngine(const QString &engineName)
 
 QString mapwidget::currentMapEngine() const
 {
-    return mCurrentEngine;
+    return m_currentEngine;
+}
+
+/**
+ * 设置无人机位置
+ * @param longitude 经度
+ * @param latitude 纬度
+ * @param heading 方向（角度）
+ * @param type 无人机类型
+ */
+void mapwidget::setDronePosition(double longitude, double latitude, double heading, const QString &type)
+{
+    m_droneLongitude = longitude;
+    m_droneLatitude = latitude;
+    m_droneHeading = heading;
+    m_droneType = type;
+    m_hasDronePosition = true;
+    update(); // 触发重绘
+}
+
+/**
+ * 清除无人机位置
+ */
+void mapwidget::clearDronePosition()
+{
+    m_hasDronePosition = false;
+    update(); // 触发重绘
+}
+
+/**
+ * 检查是否有无人机位置
+ * @return 是否有无人机位置
+ */
+bool mapwidget::hasDronePosition() const
+{
+    return m_hasDronePosition;
 }
 
 int mapwidget::getNextMarkerIndex() const
 {
-    return mNextMarkerIndex;
+    return m_nextMarkerIndex;
 }
 
 void mapwidget::resetMarkerIndices()
 {
     // 重新为所有标记分配索引
     int index = 1;
-    for (mapmarker *marker : mMarkers) {
+    for (mapmarker *marker : m_markers) {
         QString title = QString("标记%1").arg(index);
         marker->setTitle(title);
         index++;
     }
-    mNextMarkerIndex = index;
+    m_nextMarkerIndex = index;
     update();
 }
 
 void mapwidget::setSelectedMarker(mapmarker *marker)
 {
-    mSelectedMarker = marker;
+    m_selectedMarker = marker;
     update();
 }
 
 mapmarker* mapwidget::getSelectedMarker() const
 {
-    return mSelectedMarker;
+    return m_selectedMarker;
 }
 
 void mapwidget::showEditAllMarkersDialog()
@@ -576,15 +724,16 @@ void mapwidget::showEditAllMarkersDialog()
     QVBoxLayout *layout = new QVBoxLayout(&dialog);
     
     QListWidget *markerList = new QListWidget(&dialog);
-    for (int i = 0; i < mMarkers.size(); i++) {
-        mapmarker *marker = mMarkers[i];
-        QString info = QString("%1: %2, %3").arg(marker->title())
-                           .arg(marker->longitude())
-                           .arg(marker->latitude());
-        QListWidgetItem *item = new QListWidgetItem(info);
-        item->setData(Qt::UserRole, i);
-        markerList->addItem(item);
-    }
+    for (int i = 0; i < m_markers.size(); i++) {
+            mapmarker *marker = m_markers[i];
+            QString info = QString("%1: %2, %3, %4").arg(marker->title())
+                               .arg(marker->latitude())
+                               .arg(marker->longitude())
+                               .arg(marker->type());
+            QListWidgetItem *item = new QListWidgetItem(info);
+            item->setData(Qt::UserRole, i);
+            markerList->addItem(item);
+        }
     layout->addWidget(markerList);
     
     QHBoxLayout *buttonLayout = new QHBoxLayout();
@@ -601,7 +750,7 @@ void mapwidget::showEditAllMarkersDialog()
         QListWidgetItem *item = markerList->currentItem();
         if (item) {
             int index = item->data(Qt::UserRole).toInt();
-            mapmarker *marker = mMarkers[index];
+            mapmarker *marker = m_markers[index];
             
             bool ok;
             QString newTitle = QInputDialog::getText(&dialog, "编辑标记", "请输入新标题:", 
@@ -609,9 +758,10 @@ void mapwidget::showEditAllMarkersDialog()
             if (ok && !newTitle.isEmpty()) {
                 marker->setTitle(newTitle);
                 // 更新列表项
-                QString info = QString("%1: %2, %3").arg(marker->title())
+                QString info = QString("%1: %2, %3, %4").arg(marker->title())
+                                   .arg(marker->latitude())
                                    .arg(marker->longitude())
-                                   .arg(marker->latitude());
+                                   .arg(marker->type());
                 item->setText(info);
                 update();
             }
@@ -622,24 +772,25 @@ void mapwidget::showEditAllMarkersDialog()
         QListWidgetItem *item = markerList->currentItem();
         if (item) {
             int index = item->data(Qt::UserRole).toInt();
-            mapmarker *marker = mMarkers[index];
+            mapmarker *marker = m_markers[index];
             
             if (QMessageBox::question(&dialog, "删除标记", 
                                       QString("确定要删除标记 %1 吗？").arg(marker->title())) == QMessageBox::Yes) {
-                if(marker == mSelectedMarker){
-                    mSelectedMarker = nullptr;
+                if(marker == m_selectedMarker){
+                    m_selectedMarker = nullptr;
                 }
-                    mMarkers.removeAt(index);
+                    m_markers.removeAt(index);
                     delete marker;
                     delete item;
                 
                 // 重新更新列表
                 markerList->clear();
-                for (int i = 0; i < mMarkers.size(); i++) {
-                    mapmarker *m = mMarkers[i];
-                    QString info = QString("%1: %2, %3").arg(m->title())
+                for (int i = 0; i < m_markers.size(); i++) {
+                    mapmarker *m = m_markers[i];
+                    QString info = QString("%1: %2, %3, %4").arg(m->title())
+                                       .arg(m->latitude())
                                        .arg(m->longitude())
-                                       .arg(m->latitude());
+                                       .arg(m->type());
                     QListWidgetItem *newItem = new QListWidgetItem(info);
                     newItem->setData(Qt::UserRole, i);
                     markerList->addItem(newItem);

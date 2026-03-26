@@ -32,9 +32,9 @@ public:
 
     QPair<double, double> screenToGeo(int x, int y) const;  //将屏幕坐标转换为经纬度坐标
 
-    void addTrackPoint(double longitude,double latitude);
+    void addTrackPoint(double longitude,double latitude); //添加轨迹
 
-    void clearTrack();
+    void clearTrack();       //清除所有轨迹
 
 
 
@@ -42,9 +42,16 @@ public:
 
 
     QString currentMapEngine() const; //获取当前地图引擎名称
+    
+    // 无人机位置相关方法
+    void setDronePosition(double longitude, double latitude, double heading, const QString &type = "drone"); // 设置无人机位置
+    void clearDronePosition(); // 清除无人机位置
+    bool hasDronePosition() const; // 检查是否有无人机位置
 
 
-    double clampLatitude(double lat) const {
+
+
+    double clampLatitude(double lat) const {          //限制纬度在Web墨卡托投影有效范围内
         const double MAX_LAT = 85.05112878;
         return std::max(-MAX_LAT, std::min(MAX_LAT, lat));
     }
@@ -54,12 +61,12 @@ public:
 
 
 protected:
-    void paintEvent(QPaintEvent *event) override;
+    void paintEvent(QPaintEvent *event) override;    //绘制事件处理
     void wheelEvent(QWheelEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
-    void contextMenuEvent(QContextMenuEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;    //右键菜单事件处理
     void keyPressEvent(QKeyEvent *event) override;
 
 
@@ -71,7 +78,7 @@ private slots:
 
     void onTileLoaded(int zoom, int x, int y, const QPixmap &pixmap); //处理瓦片加载完成事件
 
-    void deleteSelectedMarker();
+    void deleteSelectedMarker();      //删除选中的标记点
     
 
 private:
@@ -83,19 +90,34 @@ private:
 
 
     
-    MapTileLoader *mTileLoader; ///< 地图瓦片加载器
+    MapTileLoader *m_tileLoader; ///< 地图瓦片加载器
     
     // 地图状态
-    int mZoomLevel; ///< 当前缩放级别
-    QPoint mMapOffset; ///< 地图偏移量
-    QPoint mLastMousePos; ///< 上次鼠标位置
-    bool mIsDragging; ///< 是否正在拖动
+    int m_zoomLevel; ///< 当前缩放级别
+    QPoint m_mapOffset; ///< 地图偏移量
+    QPoint m_lastMousePos; ///< 上次鼠标位置
+    bool m_isDragging; ///< 是否正在拖动
+    bool m_isDraggingMarker; ///<是否正在拖动标记
+    QPoint m_markerDragStartPos; ///<标记拖动开始的位置
+
+
     
-    QList<mapmarker*> mMarkers; ///< 标记点列表
-    QList<QPair<double, double>> mTrackPoints; ///< 轨迹点列表（经纬度）
-    mapmarker* mSelectedMarker; ///< 当前选中的标记
-    int mNextMarkerIndex; ///< 下一个标记的索引
-    QString mCurrentEngine; ///< 当前地图引擎名称
+    QList<mapmarker*> m_markers; ///< 标记点列表
+    QList<QPair<double, double>> m_trackPoints; ///< 轨迹点列表（经纬度）
+    mapmarker* m_selectedMarker; ///< 当前选中的标记
+    int m_nextMarkerIndex; ///< 下一个标记的索引
+    QString m_currentEngine; ///< 当前地图引擎名称
+    
+    // 无人机位置信息
+    bool m_hasDronePosition; ///< 是否有无人机位置
+    double m_droneLongitude; ///< 无人机经度
+    double m_droneLatitude;  ///< 无人机纬度
+    double m_droneHeading;   ///< 无人机方向（角度）
+    QString m_droneType;     ///< 无人机类型
+
+    void updateMarkerPosition(const QPoint &pos);
+
+    void drawCoordinateTooltip(QPainter *painter, const QPointF &pos, double longitude, double latitude);  //绘制坐标提示
 
     void loadVisibleTiles();  //加载可见区域的瓦片
     

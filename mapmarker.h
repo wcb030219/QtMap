@@ -8,7 +8,7 @@
 class mapmarker        //管理标记点数据
 {
 public:
-    mapmarker(double longitude, double latitude, const QString &title = "");
+    mapmarker(double longitude, double latitude, const QString &title = "", const QString &type = "");
     
     // 获取索引
     int index() const;
@@ -30,6 +30,12 @@ public:
     // 设置标题
     void setTitle(const QString &title);
     
+    // 获取类型
+    QString type() const;
+    
+    // 设置类型
+    void setType(const QString &type);
+    
     // 获取图标
     QPixmap icon() const;
     
@@ -37,11 +43,12 @@ public:
     void setIcon(const QPixmap &icon);
     
 private:
-    int mIndex;           // 标记索引
-    double mLongitude;   // 经度
-    double mLatitude;    // 纬度
-    QString mTitle;      // 标记点标题
-    QPixmap mIcon;       // 标记点图标
+    int m_index;           // 标记索引
+    double m_longitude;   // 经度
+    double m_latitude;    // 纬度
+    QString m_title;      // 标记点标题
+    QString m_type;       // 标记点类型
+    QPixmap m_icon;       // 标记点图标
 };
 
 #endif // MAPMARKER_H

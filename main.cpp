@@ -10,6 +10,7 @@ int main(int argc, char *argv[])
     QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::Floor);
 #endif
     // 显示主窗口
+
     MainWindow w;
     w.show();
     

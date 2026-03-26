@@ -35,7 +35,7 @@ public:
 class MapEngineFactory
 {
 public:
-    static mapengine *createEngine(const QString &name);
+    static mapengine *createEngine(const QString &name);     //创建地图引擎实例
 };
 
 #endif // MAPENGINE_H
