@@ -23,6 +23,13 @@ public:
     // 设置经纬度
     void setLongitude(double longitude);
     void setLatitude(double latitude);
+
+    double getHeight() const;
+    double getAltitude() const;
+
+
+    void setHeight(double height);
+    void setAltitude(double altitude);
     
     // 获取标题
     QString title() const;
@@ -46,6 +53,8 @@ private:
     int m_index;           // 标记索引
     double m_longitude;   // 经度
     double m_latitude;    // 纬度
+    double m_height;         //相对高度
+    double m_altitude;         //海拔
     QString m_title;      // 标记点标题
     QString m_type;       // 标记点类型
     QPixmap m_icon;       // 标记点图标

@@ -23,6 +23,7 @@
 #include <QGroupBox>
 #include <QTableWidget>
 #include <QHeaderView>
+#include <QCheckBox>
 
 
 mapwidget::mapwidget(QWidget *parent)
@@ -38,7 +39,8 @@ mapwidget::mapwidget(QWidget *parent)
     m_droneLongitude(0.0),
     m_droneLatitude(0.0),
     m_droneHeading(0.0),
-    m_droneType("drone")
+    m_droneType("drone"),
+    m_showHeight(true)
 {
     // 创建MapTileLoader实例
     m_tileLoader = new MapTileLoader(this);
@@ -147,8 +149,8 @@ void mapwidget::paintEvent(QPaintEvent *event)
             midPos.ry() -= 10;
             painter.drawEllipse(midPos, 15, 15);
             
-            // 绘制经纬度信息在标记旁边
-            drawCoordinateTooltip(&painter, screenPos, marker->longitude(), marker->latitude());
+            // 绘制经纬度和高度/海拔信息在标记旁边
+            drawCoordinateTooltip(&painter, screenPos, marker);
         }
     }
 
@@ -398,7 +400,7 @@ void mapwidget::contextMenuEvent(QContextMenuEvent *event)
     connect(addMarkAction, &QAction::triggered, this, [=](){
         QPair<double,double> geoPos = screenToGeo(clickPos.x(), clickPos.y());
         // 创建标记时不指定标题，让addMarker自动添加索引
-        mapmarker *marker = new mapmarker(geoPos.first, geoPos.second, "");
+        mapmarker *marker = new mapmarker(geoPos.first, geoPos.second, "", "");
         addMarker(marker);
     });
 
@@ -487,14 +489,23 @@ void mapwidget::updateMarkerPosition(const QPoint &pos)
 
 
 
-void mapwidget::drawCoordinateTooltip(QPainter *painter, const QPointF &pos, double longitude, double latitude)
+void mapwidget::drawCoordinateTooltip(QPainter *painter, const QPointF &pos, mapmarker *marker)
 {
     // 格式化坐标文本
+    double longitude = marker->longitude();
+    double latitude = marker->latitude();
     QString coordText = QString("纬度: %1\n经度: %2").arg(latitude, 0, 'f', 6).arg(longitude, 0, 'f', 6);
+    
+    // 添加高度或海拔信息
+    if (m_showHeight) {
+        coordText += QString("\n高度: %1 m").arg(marker->getHeight(), 0, 'f', 2);
+    } else {
+        coordText += QString("\n海拔: %1 m").arg(marker->getAltitude(), 0, 'f', 2);
+    }
 
     // 绘制背景
     QFontMetrics metrics(painter->font());
-    QRect textRect = metrics.boundingRect(0, 0, 200, 50, Qt::TextWordWrap, coordText);
+    QRect textRect = metrics.boundingRect(0, 0, 200, 70, Qt::TextWordWrap, coordText);
     textRect.adjust(-5, -5, 5, 5);
     // 调整位置，显示在标记的右上方
     textRect.moveTo(pos.x() + 20, pos.y() - textRect.height() - 10);
@@ -738,9 +749,6 @@ mapmarker* mapwidget::getSelectedMarker() const
 }
 
 
-
-
-
 void mapwidget::showEditAllMarkersDialog()
 {
     // 弹出一个对话框，双击直接编辑每个字段
@@ -754,16 +762,44 @@ void mapwidget::showEditAllMarkersDialog()
     QLabel *hintLabel = new QLabel("双击单元格可直接编辑", &dialog);
     hintLabel->setStyleSheet("color: gray;");
     mainLayout->addWidget(hintLabel);
+    
 
     // 使用表格显示标记信息，每列都可编辑
     QTableWidget *markerTable = new QTableWidget(&dialog);
-    markerTable->setColumnCount(4);
-    markerTable->setHorizontalHeaderLabels(QStringList() << "标题" << "纬度" << "经度" << "类型");
+    markerTable->setColumnCount(5);
+    // 根据当前显示模式设置列标题
+    QString heightHeader = m_showHeight ? "高度" : "海拔";
+    markerTable->setHorizontalHeaderLabels(QStringList() << "标题" << "纬度" << "经度" << heightHeader << "类型");
     markerTable->setRowCount(m_markers.size());
     markerTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     markerTable->setSelectionMode(QAbstractItemView::SingleSelection);
     markerTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     markerTable->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
+
+    // 高度/海拔显示控制
+    QHBoxLayout *heightControlLayout = new QHBoxLayout();
+    QCheckBox *showHeightCheckBox = new QCheckBox("显示高度", &dialog);
+    showHeightCheckBox->setChecked(m_showHeight);
+    connect(showHeightCheckBox, &QCheckBox::stateChanged, this, [this, markerTable](int state) {
+        m_showHeight = (state == Qt::Checked);
+        // 更新列标题
+        QString headerText = m_showHeight ? "高度" : "海拔";
+        markerTable->setHorizontalHeaderItem(3, new QTableWidgetItem(headerText));
+        // 更新表格数据
+        for (int i = 0; i < markerTable->rowCount(); i++) {
+            mapmarker *marker = m_markers[i];
+            double value = m_showHeight ? marker->getHeight() : marker->getAltitude();
+            QTableWidgetItem *heightAltItem = new QTableWidgetItem(QString::number(value, 'f', 2));
+            heightAltItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            heightAltItem->setData(Qt::UserRole, i);
+            markerTable->setItem(i, 3, heightAltItem);
+        }
+        update();
+    });
+    heightControlLayout->addWidget(showHeightCheckBox);
+    heightControlLayout->addStretch();
+    mainLayout->addLayout(heightControlLayout);
+
 
     for (int i = 0; i < m_markers.size(); i++) {
         mapmarker *marker = m_markers[i];
@@ -771,22 +807,28 @@ void mapwidget::showEditAllMarkersDialog()
         QTableWidgetItem *titleItem = new QTableWidgetItem(marker->title());
         QTableWidgetItem *latItem = new QTableWidgetItem(QString::number(marker->latitude(), 'f', 6));
         QTableWidgetItem *lonItem = new QTableWidgetItem(QString::number(marker->longitude(), 'f', 6));
+        double value = m_showHeight ? marker->getHeight() : marker->getAltitude();
+        QTableWidgetItem *heightAltItem = new QTableWidgetItem(QString::number(value,'f',2));
         QTableWidgetItem *typeItem = new QTableWidgetItem(marker->type());
 
         // 设置对齐方式
         latItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
         lonItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        heightAltItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
         // 存储标记索引
         titleItem->setData(Qt::UserRole, i);
         latItem->setData(Qt::UserRole, i);
         lonItem->setData(Qt::UserRole, i);
+        heightAltItem->setData(Qt::UserRole, i);
         typeItem->setData(Qt::UserRole, i);
 
         markerTable->setItem(i, 0, titleItem);
         markerTable->setItem(i, 1, latItem);
         markerTable->setItem(i, 2, lonItem);
-        markerTable->setItem(i, 3, typeItem);
+        markerTable->setItem(i, 3, heightAltItem);
+        markerTable->setItem(i, 4, typeItem);
+
     }
 
     markerTable->resizeColumnsToContents();
@@ -813,12 +855,14 @@ void mapwidget::showEditAllMarkersDialog()
             QString newTitle = markerTable->item(i, 0)->text();
             QString latStr = markerTable->item(i, 1)->text();
             QString lonStr = markerTable->item(i, 2)->text();
-            QString newType = markerTable->item(i, 3)->text();
+            QString heightAltStr = markerTable->item(i, 3)->text();
+            QString newType = markerTable->item(i, 4)->text();
 
-            // 解析经纬度
-            bool latOk = false, lonOk = false;
+            // 解析经纬度和高度
+            bool latOk = false, lonOk = false,  heightAltOk = false;
             double newLat = latStr.toDouble(&latOk);
             double newLon = lonStr.toDouble(&lonOk);
+            double newHeightAlt = heightAltStr.toDouble(&heightAltOk);
 
             if (!latOk || !lonOk) {
                 hasError = true;
@@ -832,6 +876,14 @@ void mapwidget::showEditAllMarkersDialog()
             marker->setTitle(newTitle);
             marker->setLatitude(newLat);
             marker->setLongitude(newLon);
+            if (heightAltOk) {
+                // 根据当前显示模式更新对应的高度或海拔
+                if (m_showHeight) {
+                    marker->setHeight(newHeightAlt);
+                } else {
+                    marker->setAltitude(newHeightAlt);
+                }
+            }
             marker->setType(newType);
         }
 

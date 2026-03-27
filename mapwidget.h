@@ -23,14 +23,15 @@ public:
 
     void removeMarker(mapmarker *marker); //移除标记点
     
-
     void clearMarkers();//清除所有标记点
     
 
+
     QPointF geoToScreen(double longitude, double latitude) const; //将经纬度坐标转换为屏幕坐标
     
-
     QPair<double, double> screenToGeo(int x, int y) const;  //将屏幕坐标转换为经纬度坐标
+
+
 
     void addTrackPoint(double longitude,double latitude); //添加轨迹
 
@@ -40,18 +41,13 @@ public:
 
     void setMapEngine(const QString &engineName);  //设置地图引擎
 
-
     QString currentMapEngine() const; //获取当前地图引擎名称
+
     
     // 无人机位置相关方法
     void setDronePosition(double longitude, double latitude, double heading, const QString &type = "drone"); // 设置无人机位置
     void clearDronePosition(); // 清除无人机位置
     bool hasDronePosition() const; // 检查是否有无人机位置
-    
-    // 经纬度定位功能
-    void centerOnLocation(double longitude, double latitude, int zoomLevel = -1); // 定位到指定经纬度
-    void centerOnMarker(mapmarker *marker, int zoomLevel = -1); // 定位到指定标记点
-
 
 
 
@@ -59,8 +55,6 @@ public:
         const double MAX_LAT = 85.05112878;
         return std::max(-MAX_LAT, std::min(MAX_LAT, lat));
     }
-
-
 
 
 
@@ -72,9 +66,6 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;    //右键菜单事件处理
     void keyPressEvent(QKeyEvent *event) override;
-
-
-
 
 
 
@@ -111,6 +102,7 @@ private:
     mapmarker* m_selectedMarker; ///< 当前选中的标记
     int m_nextMarkerIndex; ///< 下一个标记的索引
     QString m_currentEngine; ///< 当前地图引擎名称
+
     
     // 无人机位置信息
     bool m_hasDronePosition; ///< 是否有无人机位置
@@ -118,28 +110,28 @@ private:
     double m_droneLatitude;  ///< 无人机纬度
     double m_droneHeading;   ///< 无人机方向（角度）
     QString m_droneType;     ///< 无人机类型
+    
+    // 高度/海拔显示模式
+    bool m_showHeight; ///< 是否显示高度（true）或海拔（false）
 
-    void updateMarkerPosition(const QPoint &pos);
 
-    void drawCoordinateTooltip(QPainter *painter, const QPointF &pos, double longitude, double latitude);  //绘制坐标提示
+
+    void updateMarkerPosition(const QPoint &pos);  //更改标记点位置
+
+    void drawCoordinateTooltip(QPainter *painter, const QPointF &pos, mapmarker *marker);  //绘制坐标提示
 
     void loadVisibleTiles();  //加载可见区域的瓦片
     
-
     mapmarker* findMarkerAtPosition(const QPoint &pos) const;  //检测点击位置是否在某个标记上
     
-
     int getNextMarkerIndex() const;  //获取下一个可用的标记索引
     
-
     void resetMarkerIndices();  //重置所有标记的索引
     
-
     void setSelectedMarker(mapmarker *marker);  //设置选中的标记
 
     mapmarker* getSelectedMarker() const;  //获取当前选中的标记
     
-
     void showEditAllMarkersDialog();  //显示编辑所有标记的对话框
 };
 

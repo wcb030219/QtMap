@@ -4,6 +4,8 @@ mapmarker::mapmarker(double longitude, double latitude, const QString &title, co
     : m_index(-1),
       m_longitude(longitude),
       m_latitude(latitude),
+      m_height(0.0),
+      m_altitude(0.0),
       m_title(title),
       m_type(type)
 {}
@@ -42,6 +44,26 @@ void mapmarker::setLongitude(double longitude)
 void mapmarker::setLatitude(double latitude)
 {
     m_latitude = latitude;
+}
+
+double mapmarker::getHeight() const
+{
+    return m_height;
+}
+
+double mapmarker::getAltitude() const
+{
+    return m_altitude;
+}
+
+void mapmarker::setHeight(double height)
+{
+    m_height = height;
+}
+
+void mapmarker::setAltitude(double altitude)
+{
+    m_altitude = altitude;
 }
 
 // 获取标题
