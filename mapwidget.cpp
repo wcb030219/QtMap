@@ -167,6 +167,9 @@ void mapwidget::paintEvent(QPaintEvent *event)
     
 
 
+
+
+
     // 绘制无人机位置
     if (m_hasDronePosition) {
         QPointF screenPos = geoToScreen(m_droneLongitude, m_droneLatitude);
@@ -212,6 +215,7 @@ void mapwidget::paintEvent(QPaintEvent *event)
         painter.drawText(textRect, Qt::AlignCenter, droneInfo);
     }
 }
+
 
 
 

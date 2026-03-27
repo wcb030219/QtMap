@@ -88,8 +88,8 @@ private slots:
 private:
     // 地图常量
     static const int TILE_SIZE = 256; ///< 单张瓦片尺寸（高德/谷歌都是256x256）
-    static const int MIN_ZOOM_LEVEL = 3; ///< 最小缩放级别
-    static const int MAX_ZOOM_LEVEL = 8; ///< 最大缩放级别
+    static const int MIN_ZOOM_LEVEL = 4; ///< 最小缩放级别
+    static const int MAX_ZOOM_LEVEL = 18; ///< 最大缩放级别
     static const int INITIAL_ZOOM_LEVEL = 12; ///< 初始缩放级别
 
 
